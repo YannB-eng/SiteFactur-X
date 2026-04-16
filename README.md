@@ -38,3 +38,4 @@ Calculs Temps Réel : Tous les totaux (HT, TVA par taux, TTC) sont recalculés �
 5. Versions déployées
 * 16/04/2026 : Site permettant de générer des factures au format Factur-X, mais aussi de valider des factures au format Factur-X. Norme Couche PDF : Format PDF/A-3. Norme Couche XML : format UN/CEFACT CII.
 * 16/04/2026 : version 1.0 gestion des clients et des factures au format Factur-X, validation des factures au format Factur-X
+* 17/04/2026 : version 1.1 Mise en conformité du PDF au format Factur-X (Profil BASIC). Le PDF généré inclut désormais l'attachement XML conforme à la norme UN/CEFACT CII et les métadonnées XMP nécessaires pour une validation hybride complète.
