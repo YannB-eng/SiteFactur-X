@@ -6,8 +6,11 @@
   "postcode": "12190",
   "city": "COUBISOU",
   "country": "FRANCE",
-  "conditions": "Paiement à réception de facture.",
+  "conditions": "Conditions et modalités de paiement : par virement ou par chèque",
+  "bank": "La Banque Postale",
   "iban": "FR76 3000 6000 0102 0304 0506 078",
+  "swift": "PSSTFRPPSCE",
   "site": "byosphere.fr",
-  "email": "byosphere.dev@gmail.com"
+  "email": "byosphere.dev@gmail.com",
+  "telephone": "0682545331"
 }
