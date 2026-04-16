@@ -1,0 +1,13 @@
+{
+  "name": "BYOSPHERE",
+  "siret": "79238423200023",
+  "vat_number": "FR92792384232",
+  "address": "4249, RTE DU MONASTERE-CABRESPINE 12190 COUBISOU",
+  "postcode": "12190",
+  "city": "COUBISOU",
+  "country": "FRANCE",
+  "conditions": "Paiement à réception de facture.",
+  "iban": "FR76 3000 6000 0102 0304 0506 078",
+  "site": "byosphere.fr",
+  "email": "byosphere.dev@gmail.com"
+}

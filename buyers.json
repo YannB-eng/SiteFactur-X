@@ -1,0 +1,32 @@
+[
+  {
+    "id": "buyer_1",
+    "name": "CAFE-RESTAURANT VERDIER",
+    "siret": "44098837600016",
+    "email": "compta@verdier.fr",
+    "address": "22 PL DE LA PORTE THERON, 12500 SAINT COME D'OLT",
+    "postcode": "12500",
+    "city": "SAINT COME D'OLT",
+    "country": "FRANCE"
+  },
+  {
+    "id": "buyer_2",
+    "name": "BOULANGERIE DU LAC",
+    "siret": "12345678901234",
+    "email": "contact@boulangeriedulac.fr",
+    "address": "5 Grande Rue, 74000 ANNECY",
+    "postcode": "74000",
+    "city": "ANNECY",
+    "country": "FRANCE"
+  },
+  {
+    "id": "buyer_3",
+    "name": "HOTEL DES ALPES",
+    "siret": "98765432109876",
+    "email": "reservation@hoteldesalpes.com",
+    "address": "12 Avenue de la Gare, 38000 GRENOBLE",
+    "postcode": "38000",
+    "city": "GRENOBLE",
+    "country": "FRANCE"
+  }
+]

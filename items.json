@@ -1,0 +1,14 @@
+[
+  {
+    "description": "Prestation formation n8n",
+    "quantity": 1,
+    "unitPrice": 350.00,
+    "tva": 20
+  },
+  {
+    "description": "Prestation concepteur développement",
+    "quantity": 1,
+    "unitPrice": 450.00,
+    "tva": 20
+  }
+]

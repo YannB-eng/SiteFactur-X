@@ -1,0 +1,1326 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FacturX Validator — Analyse & Conformité PDF/A-3</title>
+  <meta name="description"
+    content="Validateur Factur-X client-side : extraction XML, parsing EN 16931, vérification signature numérique. Aucune donnée envoyée sur un serveur." />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#eef2ff',
+              100: '#e0e7ff',
+              400: '#818cf8',
+              500: '#6366f1',
+              600: '#4f46e5',
+              700: '#4338ca',
+              900: '#1e1b4b',
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+    rel="stylesheet" />
+
+  <!-- PDF.js via CDN (legacy build – no import maps needed) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+  <!-- Node-forge for certificate parsing -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/node-forge/1.3.1/forge.min.js"></script>
+
+  <style>
+    /* ── Custom scrollbar ── */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #1e1b4b22;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #6366f1;
+      border-radius: 3px;
+    }
+
+    /* ── Glassmorphism card ── */
+    .glass {
+      background: rgba(255, 255, 255, 0.04);
+      backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.10);
+    }
+
+    /* ── Animated gradient background ── */
+    body {
+      background: linear-gradient(135deg, #0f0c29 0%, #1a1040 40%, #0d0d1a 100%);
+      min-height: 100vh;
+    }
+
+    /* ── Drop zone animation ── */
+    @keyframes pulse-ring {
+      0% {
+        box-shadow: 0 0 0 0 rgba(99, 102, 241, .6);
+      }
+
+      100% {
+        box-shadow: 0 0 0 20px rgba(99, 102, 241, 0);
+      }
+    }
+
+    .drop-active {
+      animation: pulse-ring 1.2s ease-out infinite;
+    }
+
+    /* ── Floating orbs ── */
+    @keyframes float {
+
+      0%,
+      100% {
+        transform: translateY(0) scale(1);
+      }
+
+      50% {
+        transform: translateY(-20px) scale(1.05);
+      }
+    }
+
+    .orb {
+      animation: float 8s ease-in-out infinite;
+    }
+
+    .orb-2 {
+      animation-duration: 11s;
+      animation-delay: -3s;
+    }
+
+    .orb-3 {
+      animation-duration: 14s;
+      animation-delay: -6s;
+    }
+
+    /* ── Progress bar fill ── */
+    @keyframes shimmer {
+      0% {
+        background-position: -200% center;
+      }
+
+      100% {
+        background-position: 200% center;
+      }
+    }
+
+    .progress-bar {
+      background: linear-gradient(90deg, #4f46e5 0%, #818cf8 40%, #c7d2fe 60%, #4f46e5 100%);
+      background-size: 200% auto;
+      animation: shimmer 1.8s linear infinite;
+      transition: width .4s cubic-bezier(.4, 0, .2, 1);
+    }
+
+    /* ── Badge micro-anim ── */
+    @keyframes badge-in {
+      from {
+        opacity: 0;
+        transform: scale(.7) translateY(6px);
+      }
+
+      to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+      }
+    }
+
+    .badge-anim {
+      animation: badge-in .35s cubic-bezier(.34, 1.56, .64, 1) forwards;
+    }
+
+    /* ── XML code block ── */
+    .xml-block {
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .78rem;
+      line-height: 1.6;
+      color: #a5b4fc;
+    }
+
+    /* ── Spinner ── */
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .spinner {
+      animation: spin .9s linear infinite;
+    }
+
+    /* ── Glow text ── */
+    .glow {
+      text-shadow: 0 0 24px rgba(99, 102, 241, .8);
+    }
+
+    /* ── Table hover ── */
+    .data-row {
+      transition: background .15s;
+    }
+
+    .data-row:hover {
+      background: rgba(99, 102, 241, .12);
+    }
+  </style>
+</head>
+
+<body class="font-sans text-white antialiased overflow-x-hidden">
+
+  <!-- ══════════════════════════════════════════
+       BACKGROUND DECORATIONS
+  ════════════════════════════════════════════ -->
+  <div class="fixed inset-0 overflow-hidden pointer-events-none -z-10" aria-hidden="true">
+    <div class="orb   absolute top-[-10%] left-[-8%]  w-[480px] h-[480px] rounded-full bg-indigo-700/20 blur-3xl"></div>
+    <div class="orb-2 absolute top-[30%] right-[-6%] w-[380px] h-[380px] rounded-full bg-violet-600/15 blur-3xl"></div>
+    <div class="orb-3 absolute bottom-[-8%] left-[30%] w-[420px] h-[420px] rounded-full bg-blue-700/10 blur-3xl"></div>
+  </div>
+
+  <!-- ══════════════════════════════════════════
+       HEADER
+  ════════════════════════════════════════════ -->
+  <header class="border-b border-white/5 py-5 px-6">
+    <div class="max-w-5xl mx-auto flex items-center gap-3">
+      <div
+        class="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg">
+        <svg class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round"
+            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414A1 1 0 0119 9.414V19a2 2 0 01-2 2z" />
+        </svg>
+      </div>
+      <div class="flex flex-col">
+        <div class="flex items-baseline gap-2">
+          <h1 class="text-lg font-bold bg-gradient-to-r from-indigo-300 to-violet-300 bg-clip-text text-transparent glow">
+            FacturX Validator
+          </h1>
+          <span class="text-[10px] font-mono text-indigo-400 opacity-70 tracking-tighter">v1.0</span>
+        </div>
+        <p class="text-xs text-white/40">Analyse &amp; Conformité EN 16931 · 100% client-side</p>
+      </div>
+      <div class="ml-auto flex items-center gap-4">
+        <a href="genere-factur-x.html"
+          class="hidden sm:flex items-center gap-2 px-4 py-1.5 rounded-full bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 text-xs text-indigo-300 transition-all">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+          </svg>
+          Créer une facture
+        </a>
+        <div class="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full glass text-xs text-white/50">
+          <div class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
+          Aucune donnée transmise
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ══════════════════════════════════════════
+       MAIN CONTENT
+  ════════════════════════════════════════════ -->
+  <main class="max-w-5xl mx-auto px-4 sm:px-6 py-10 space-y-8">
+
+    <!-- ── Hero ── -->
+    <section class="text-center space-y-3">
+      <h2
+        class="text-3xl sm:text-4xl font-extrabold bg-gradient-to-r from-indigo-200 via-violet-200 to-blue-200 bg-clip-text text-transparent">
+        Validez vos factures Factur-X
+      </h2>
+      <p class="text-white/50 max-w-xl mx-auto text-sm leading-relaxed">
+        Déposez un PDF conforme PDF/A-3 pour extraire le XML Factur-X embarqué, vérifier la
+        conformité <strong class="text-white/70">EN 16931</strong> et détecter les signatures numériques.
+      </p>
+    </section>
+
+    <!-- ── Drop Zone ── -->
+    <section id="dropZone" class="relative group glass rounded-3xl border-2 border-dashed border-white/20 p-12
+             flex flex-col items-center justify-center gap-4 cursor-pointer
+             hover:border-indigo-400/60 hover:bg-white/[.03] transition-all duration-300"
+      aria-label="Zone de dépôt de fichier PDF" role="button" tabindex="0" ondragover="handleDragOver(event)"
+      ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)" onclick="fileInput.click()"
+      onkeydown="if(event.key==='Enter'||event.key===' ')fileInput.click()">
+
+      <!-- Icon -->
+      <div class="w-20 h-20 rounded-2xl bg-gradient-to-br from-indigo-600/40 to-violet-600/40 border border-white/10
+                  flex items-center justify-center group-hover:scale-105 transition-transform duration-300">
+        <svg class="w-10 h-10 text-indigo-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+          <path stroke-linecap="round" stroke-linejoin="round"
+            d="M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.338-2.32 5.75 5.75 0 0 1 5.072 5.646A4.5 4.5 0 0 1 17.25 19.5H6.75Z" />
+        </svg>
+      </div>
+
+      <div class="text-center">
+        <p class="font-semibold text-white/80">Glissez votre fichier PDF ici</p>
+        <p class="text-sm text-white/40 mt-1">ou <span class="text-indigo-400 underline underline-offset-2">cliquez pour
+            parcourir</span></p>
+      </div>
+
+      <div class="flex gap-2 flex-wrap justify-center">
+        <span
+          class="px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 text-xs border border-indigo-500/30">PDF/A-3</span>
+        <span
+          class="px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-300 text-xs border border-violet-500/30">Factur-X</span>
+        <span class="px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 text-xs border border-blue-500/30">EN
+          16931</span>
+        <span
+          class="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-xs border border-emerald-500/30">ZUGFeRD</span>
+      </div>
+
+      <input id="fileInput" type="file" accept="application/pdf,.pdf" class="hidden" onchange="handleFileSelect(event)"
+        aria-label="Sélectionner un fichier PDF" />
+    </section>
+
+    <!-- ── Progress Section (hidden initially) ── -->
+    <section id="progressSection" class="hidden space-y-3">
+      <div class="glass rounded-2xl p-5 space-y-3">
+        <div class="flex items-center justify-between text-sm">
+          <span id="progressLabel" class="text-white/70 font-medium flex items-center gap-2">
+            <svg id="spinner" class="spinner w-4 h-4 text-indigo-400" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            Initialisation…
+          </span>
+          <span id="progressPercent" class="text-indigo-300 font-bold tabular-nums">0%</span>
+        </div>
+        <div class="w-full h-2 rounded-full bg-white/5 overflow-hidden">
+          <div id="progressBar" class="progress-bar h-full rounded-full" style="width:0%"></div>
+        </div>
+        <div id="progressSteps" class="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1"></div>
+      </div>
+    </section>
+
+    <!-- ── Results Section (hidden initially) ── -->
+    <section id="resultsSection" class="hidden space-y-6">
+
+      <!-- File info banner -->
+      <div id="fileBanner" class="glass rounded-2xl p-4 flex items-center gap-4">
+        <div
+          class="w-12 h-12 rounded-xl bg-gradient-to-br from-red-600/40 to-orange-600/40 flex items-center justify-center shrink-0">
+          <svg class="w-6 h-6 text-red-300" fill="currentColor" viewBox="0 0 24 24">
+            <path
+              d="M12.8 2H4a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9.6L12.8 2ZM12 3.6 18.4 10H13a1 1 0 0 1-1-1V3.6ZM4 20V4h6v5a3 3 0 0 0 3 3h5v8H4Z" />
+          </svg>
+        </div>
+        <div class="flex-1 min-w-0">
+          <p id="fileName" class="font-semibold text-white/90 truncate"></p>
+          <p id="fileSize" class="text-xs text-white/40 mt-0.5"></p>
+        </div>
+        <button onclick="resetTool()" class="shrink-0 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10
+                 text-xs text-white/60 hover:text-white/90 transition-all duration-200 flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round"
+              d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+          </svg>
+          Nouveau fichier
+        </button>
+      </div>
+
+      <!-- ── Validation Summary ── -->
+      <div id="validationSummary" class="grid grid-cols-2 sm:grid-cols-4 gap-3"></div>
+
+      <!-- ── Data Cards ── -->
+      <div id="dataCards" class="glass rounded-2xl overflow-hidden">
+        <div class="px-6 py-4 border-b border-white/5 flex items-center gap-2">
+          <svg class="w-5 h-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round"
+              d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 0 1 0 3.75H5.625a1.875 1.875 0 0 1 0-3.75Z" />
+          </svg>
+          <h3 class="font-semibold text-white/90">Données extraites</h3>
+        </div>
+        <div id="dataTable" class="divide-y divide-white/5"></div>
+      </div>
+
+      <!-- ── Validation Checklist ── -->
+      <div class="glass rounded-2xl overflow-hidden">
+        <div class="px-6 py-4 border-b border-white/5 flex items-center gap-2">
+          <svg class="w-5 h-5 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round"
+              d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+          </svg>
+          <h3 class="font-semibold text-white/90">Conformité EN 16931</h3>
+          <span id="profileBadge" class="ml-auto"></span>
+        </div>
+        <div id="checklistItems" class="divide-y divide-white/5 p-2"></div>
+      </div>
+
+      <!-- ── Digital Signature ── -->
+      <div class="glass rounded-2xl overflow-hidden">
+        <div class="px-6 py-4 border-b border-white/5 flex items-center gap-2">
+          <svg class="w-5 h-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round"
+              d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
+          </svg>
+          <h3 class="font-semibold text-white/90">Signature Numérique</h3>
+        </div>
+        <div id="signatureResult" class="p-6"></div>
+      </div>
+
+      <!-- ── Raw XML ── -->
+      <div class="glass rounded-2xl overflow-hidden">
+        <div class="px-6 py-4 border-b border-white/5 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <svg class="w-5 h-5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round"
+                d="M17.25 6.75 22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3-4.5 16.5" />
+            </svg>
+            <h3 class="font-semibold text-white/90">XML Factur-X brut</h3>
+          </div>
+          <div class="flex gap-2">
+            <button id="xmlCopy" onclick="copyXml()"
+              class="hidden text-xs text-white/60 hover:text-white/90 transition-colors px-2 py-1 rounded-lg hover:bg-white/5 flex items-center gap-1">
+              <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path
+                  d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+              Copier
+            </button>
+            <button id="xmlToggle" onclick="toggleXml()"
+              class="text-xs text-indigo-400 hover:text-indigo-300 transition-colors px-2 py-1 rounded-lg hover:bg-white/5">
+              Afficher ▾
+            </button>
+          </div>
+        </div>
+        <div id="xmlContainer" class="hidden p-5 max-h-72 overflow-auto">
+          <pre id="xmlContent" class="xml-block"></pre>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ── Error Section ── -->
+    <section id="errorSection" class="hidden">
+      <div class="glass rounded-2xl border border-red-500/30 p-6 flex gap-4">
+        <div class="w-10 h-10 rounded-xl bg-red-500/20 flex items-center justify-center shrink-0">
+          <svg class="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round"
+              d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+          </svg>
+        </div>
+        <div>
+          <p class="font-semibold text-red-300">Erreur d'analyse</p>
+          <p id="errorMessage" class="text-sm text-white/60 mt-1"></p>
+          <button onclick="resetTool()" class="mt-3 px-4 py-2 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-500/30
+                   text-sm text-red-300 transition-all duration-200">
+            Réessayer
+          </button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ══════════════════════════════════════════
+       FOOTER
+  ════════════════════════════════════════════ -->
+  <footer class="border-t border-white/5 mt-16 py-6 text-center text-xs text-white/30">
+    <p>FacturX Architect · 2026 © Byosphere - Tous droits réservés · Traitement local · Norme <abbr
+        title="European Standard 16931">EN 16931</abbr></p>
+  </footer>
+
+  <!-- ══════════════════════════════════════════
+       JAVASCRIPT
+  ════════════════════════════════════════════ -->
+  <script>
+    // ─────────────────────────────────────────────
+    //  PDF.js worker configuration
+    // ─────────────────────────────────────────────
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+    // ──────────────────────────────────────────────
+    //  State
+    // ──────────────────────────────────────────────
+    const state = {
+      xmlText: '',
+      xmlVisible: false,
+    };
+
+    // ──────────────────────────────────────────────
+    //  UI Helpers
+    // ──────────────────────────────────────────────
+    const $ = id => document.getElementById(id);
+
+    function setProgress(pct, label) {
+      $('progressBar').style.width = pct + '%';
+      $('progressPercent').textContent = pct + '%';
+      $('progressLabel').innerHTML = `
+      <svg class="spinner w-4 h-4 text-indigo-400" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+      </svg>
+      ${label}`;
+    }
+
+    function addStep(label, status) {
+      // status: 'pending' | 'ok' | 'warn' | 'error'
+      const colors = {
+        pending: 'bg-white/5 text-white/40',
+        ok: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30',
+        warn: 'bg-amber-500/15 text-amber-300 border border-amber-500/30',
+        error: 'bg-red-500/15 text-red-300 border border-red-500/30',
+      };
+      const icons = {
+        pending: '⏳',
+        ok: '✓',
+        warn: '⚠',
+        error: '✗',
+      };
+      const div = document.createElement('div');
+      div.className = `badge-anim rounded-lg px-3 py-2 text-xs font-medium flex items-center gap-1.5 ${colors[status]}`;
+      div.innerHTML = `<span>${icons[status]}</span><span class="truncate">${label}</span>`;
+      $('progressSteps').appendChild(div);
+    }
+
+    function showError(msg) {
+      $('errorMessage').textContent = msg;
+      $('errorSection').classList.remove('hidden');
+      $('progressSection').classList.add('hidden');
+    }
+
+    function resetTool() {
+      ['progressSection', 'resultsSection', 'errorSection'].forEach(id => $(id).classList.add('hidden'));
+      $('progressSteps').innerHTML = '';
+      $('progressBar').style.width = '0%';
+      $('dropZone').classList.remove('hidden');
+      $('fileInput').value = '';
+      state.xmlText = '';
+      state.xmlVisible = false;
+      $('xmlToggle').textContent = 'Afficher ▾';
+      $('xmlContainer').classList.add('hidden');
+      $('dataTable').innerHTML = '';
+      $('checklistItems').innerHTML = '';
+      $('validationSummary').innerHTML = '';
+      $('progressSteps').innerHTML = '';
+    }
+
+    function toggleXml() {
+      state.xmlVisible = !state.xmlVisible;
+      $('xmlContainer').classList.toggle('hidden', !state.xmlVisible);
+      $('xmlToggle').textContent = state.xmlVisible ? 'Masquer ▴' : 'Afficher ▾';
+      $('xmlCopy').classList.toggle('hidden', !state.xmlVisible);
+    }
+
+    async function copyXml() {
+      try {
+        await navigator.clipboard.writeText(state.xmlText);
+        const btn = $('xmlCopy');
+        const oldHtml = btn.innerHTML;
+        btn.innerHTML = '✓ Copié !';
+        setTimeout(() => btn.innerHTML = oldHtml, 2000);
+      } catch (err) { console.error('Erreur copie:', err); }
+    }
+
+    // ──────────────────────────────────────────────
+    //  Drag & Drop handlers
+    // ──────────────────────────────────────────────
+    function handleDragOver(e) {
+      e.preventDefault();
+      $('dropZone').classList.add('drop-active', 'border-indigo-400/60');
+    }
+    function handleDragLeave(e) {
+      $('dropZone').classList.remove('drop-active', 'border-indigo-400/60');
+    }
+    function handleDrop(e) {
+      e.preventDefault();
+      $('dropZone').classList.remove('drop-active', 'border-indigo-400/60');
+      const file = e.dataTransfer.files[0];
+      if (file) processFile(file);
+    }
+    function handleFileSelect(e) {
+      const file = e.target.files[0];
+      if (file) processFile(file);
+    }
+
+    // ──────────────────────────────────────────────
+    //  MAIN ORCHESTRATOR
+    // ──────────────────────────────────────────────
+    async function processFile(file) {
+      if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
+        showError('Le fichier sélectionné n\'est pas un PDF. Veuillez déposer un fichier .pdf.');
+        return;
+      }
+
+      // Show progress UI
+      $('dropZone').classList.add('hidden');
+      $('progressSection').classList.remove('hidden');
+      $('resultsSection').classList.add('hidden');
+      $('errorSection').classList.add('hidden');
+      $('progressSteps').innerHTML = '';
+
+      try {
+        // ① Read file bytes
+        setProgress(5, 'Lecture du fichier PDF…');
+        const arrayBuffer = await file.arrayBuffer();
+        const uint8 = new Uint8Array(arrayBuffer);
+
+        // ② Load with PDF.js
+        setProgress(20, 'Chargement PDF.js…');
+        const loadingTask = pdfjsLib.getDocument({ data: uint8 });
+        const pdfDoc = await loadingTask.promise;
+        addStep('PDF chargé', 'ok');
+
+        // ③ Extract XML attachment
+        setProgress(40, 'Recherche de la pièce jointe XML…');
+        let xmlBytes = null;
+        let xmlFilename = '';
+        const candidateNames = ['factur-x.xml', 'zugferd-invoice.xml', 'xrechnung.xml', 'order-x.xml'];
+
+        try {
+          const attachments = await pdfDoc.getAttachments();
+          if (attachments) {
+            // Try known Factur-X filenames first
+            for (const name of candidateNames) {
+              if (attachments[name]) {
+                xmlBytes = attachments[name].content;
+                xmlFilename = name;
+                break;
+              }
+            }
+            // Fallback: any .xml attachment
+            if (!xmlBytes) {
+              for (const [name, att] of Object.entries(attachments)) {
+                if (name.toLowerCase().endsWith('.xml')) {
+                  xmlBytes = att.content;
+                  xmlFilename = name;
+                  break;
+                }
+              }
+            }
+          }
+        } catch (attErr) {
+          console.warn('getAttachments error:', attErr);
+        }
+
+        // If PDF.js attachments API didn't work, try raw bytes scan
+        if (!xmlBytes) {
+          xmlBytes = extractXmlFromRawPdf(uint8);
+          if (xmlBytes) xmlFilename = 'factur-x.xml (extrait brut)';
+        }
+
+        if (!xmlBytes) {
+          addStep('XML non trouvé', 'error');
+          throw new Error(
+            'Aucune pièce jointe XML Factur-X trouvée dans ce PDF. ' +
+            'Assurez-vous que le fichier est un PDF/A-3 conforme Factur-X.'
+          );
+        }
+
+        // Decode XML
+        const decoder = new TextDecoder('utf-8');
+        state.xmlText = decoder.decode(xmlBytes);
+        addStep(`XML trouvé : ${xmlFilename}`, 'ok');
+
+        // ④ Parse XML data
+        setProgress(60, 'Parsing des données XML…');
+        const xmlDoc = parseXML(state.xmlText);
+        const invoiceData = extractInvoiceData(xmlDoc);
+        addStep('Données extraites', invoiceData._parseOk ? 'ok' : 'warn');
+
+        // ⑤ EN 16931 Validation
+        setProgress(75, 'Validation EN 16931…');
+        const validation = validateEN16931(xmlDoc, state.xmlText);
+        addStep(`Profil : ${validation.profile}`, validation.profileOk ? 'ok' : 'warn');
+
+        // ⑥ Signature detection
+        setProgress(88, 'Détection de signature numérique…');
+        const sigResult = await detectSignature(uint8, pdfDoc);
+        addStep('Signature ' + (sigResult.found ? 'détectée' : 'absente'), sigResult.found ? (sigResult.valid === false ? 'warn' : 'ok') : 'warn');
+
+        // ⑦ Render results
+        setProgress(100, 'Analyse terminée ✓');
+        await sleep(400);
+
+        $('progressSection').classList.add('hidden');
+        renderResults(file, invoiceData, validation, sigResult);
+
+      } catch (err) {
+        console.error(err);
+        showError(err.message || 'Erreur inconnue lors de l\'analyse.');
+      }
+    }
+
+    // ──────────────────────────────────────────────
+    //  RAW PDF XML EXTRACTION (fallback)
+    // ──────────────────────────────────────────────
+    function extractXmlFromRawPdf(uint8) {
+      // Search for <?xml marker in the PDF bytes
+      const text = new TextDecoder('latin1').decode(uint8);
+      const startIdx = text.indexOf('<?xml');
+      if (startIdx === -1) return null;
+      const endMarkers = ['</rsm:CrossIndustryInvoice>', '</ubl:Invoice>', '</Invoice>',
+        '</CrossIndustryInvoice>', '</rsm:CrossIndustryDocument>'];
+      let endIdx = -1;
+      let endMarker = '';
+      for (const m of endMarkers) {
+        const idx = text.indexOf(m, startIdx);
+        if (idx !== -1) { endIdx = idx + m.length; endMarker = m; break; }
+      }
+      if (endIdx === -1) return null;
+      const xmlStr = text.slice(startIdx, endIdx);
+      return new TextEncoder().encode(xmlStr);
+    }
+
+    // ──────────────────────────────────────────────
+    //  XML PARSING
+    // ──────────────────────────────────────────────
+    function parseXML(xmlText) {
+      const parser = new DOMParser();
+      return parser.parseFromString(xmlText, 'text/xml');
+    }
+
+    // Namespace-aware text extraction helper
+    function getText(doc, ...paths) {
+      for (const path of paths) {
+        const parts = path.split('/');
+        let nodes = [doc];
+        for (const part of parts) {
+          const next = [];
+          for (const n of nodes) {
+            const children = n.childNodes || [];
+            for (const c of children) {
+              const localName = c.localName || c.nodeName?.split(':').pop();
+              if (localName === part) next.push(c);
+            }
+            // Also try direct getElementsByTagName tricks
+            if (n.getElementsByTagNameNS) {
+              const found = n.getElementsByTagNameNS('*', part);
+              for (const f of found) if (!next.includes(f)) next.push(f);
+            }
+          }
+          nodes = next;
+          if (!nodes.length) break;
+        }
+        if (nodes.length && nodes[0].textContent?.trim()) {
+          return nodes[0].textContent.trim();
+        }
+      }
+      return null;
+    }
+
+    function getAttr(doc, tagName, attrName) {
+      const els = doc.getElementsByTagNameNS('*', tagName);
+      for (const el of els) {
+        const val = el.getAttribute(attrName);
+        if (val) return val;
+      }
+      return null;
+    }
+
+    // ──────────────────────────────────────────────
+    //  DATA EXTRACTION
+    // ──────────────────────────────────────────────
+    function extractInvoiceData(xmlDoc) {
+      const d = {};
+
+      // ── Numéro de facture
+      d.invoiceNumber = getText(xmlDoc, 'ID') || getText(xmlDoc, 'InvoiceNumber');
+
+      // ── Date de facture
+      const rawDate = getText(xmlDoc, 'IssueDateTime', 'DateTimeString')
+        || getText(xmlDoc, 'IssueDate', 'Date')
+        || getText(xmlDoc, 'IssueDate');
+      d.invoiceDate = rawDate ? formatDate(rawDate) : null;
+
+      // ── Fournisseur
+      d.supplierName = getText(xmlDoc, 'SellerTradeParty', 'Name')
+        || getText(xmlDoc, 'AccountingSupplierParty', 'Party', 'PartyName', 'Name')
+        || getText(xmlDoc, 'SellerTradeParty', 'PartyName', 'Name');
+
+      // ── SIRET / ID fournisseur
+      const idEl = findIdentifier(xmlDoc, ['SellerTradeParty', 'AccountingSupplierParty']);
+      d.supplierSiret = idEl;
+
+      // ── Acheteur
+      d.buyerName = getText(xmlDoc, 'BuyerTradeParty', 'Name')
+        || getText(xmlDoc, 'AccountingCustomerParty', 'Party', 'PartyName', 'Name');
+
+      // ── Montants
+      d.amountHT = findAmount(xmlDoc, ['TaxBasisTotalAmount', 'TaxExclusiveAmount', 'LineExtensionAmount']);
+      d.amountTVA = findAmount(xmlDoc, ['TaxTotalAmount', 'TaxAmount']);
+      d.amountTTC = findAmount(xmlDoc, ['GrandTotalAmount', 'TaxInclusiveAmount', 'PayableAmount']);
+
+      // ── Devise
+      d.currency = getAttr(xmlDoc, 'GrandTotalAmount', 'currencyID')
+        || getAttr(xmlDoc, 'TaxInclusiveAmount', 'currencyID')
+        || getAttr(xmlDoc, 'SpecifiedTradeSettlementHeaderMonetarySummation', 'currencyID')
+        || 'EUR';
+
+      // ── Profile
+      d.profileId = getProfileId(xmlDoc);
+
+      d._parseOk = !!(d.invoiceNumber || d.supplierName || d.amountTTC);
+      return d;
+    }
+
+    function findIdentifier(xmlDoc, parentTags) {
+      // Try to find SIRET / registration in common elements
+      const candidates = ['SpecifiedLegalOrganization', 'PartyLegalEntity'];
+      for (const parent of parentTags) {
+        for (const cand of candidates) {
+          const val = getText(xmlDoc, parent, cand, 'ID');
+          if (val) return val;
+        }
+      }
+      // Fallback: look for any ID inside SellerTradeParty
+      const parents = xmlDoc.getElementsByTagNameNS('*', 'SellerTradeParty');
+      for (const p of parents) {
+        const ids = p.getElementsByTagNameNS('*', 'ID');
+        for (const id of ids) {
+          if (id.textContent?.trim()) return id.textContent.trim();
+        }
+      }
+      return null;
+    }
+
+    function findAmount(xmlDoc, tagNames) {
+      for (const tag of tagNames) {
+        const els = xmlDoc.getElementsByTagNameNS('*', tag);
+        for (const el of els) {
+          const v = parseFloat(el.textContent);
+          if (!isNaN(v)) return v.toFixed(2);
+        }
+      }
+      return null;
+    }
+
+    function getProfileId(xmlDoc) {
+      // GuidelineSpecifiedDocumentContextParameter/ID
+      const ids = xmlDoc.getElementsByTagNameNS('*', 'GuidelineSpecifiedDocumentContextParameter');
+      for (const el of ids) {
+        const idEl = el.getElementsByTagNameNS('*', 'ID');
+        if (idEl[0]) return idEl[0].textContent.trim();
+      }
+      // UBL customization
+      const cids = xmlDoc.getElementsByTagNameNS('*', 'CustomizationID');
+      if (cids[0]) return cids[0].textContent.trim();
+      return null;
+    }
+
+    function formatDate(raw) {
+      if (!raw) return null;
+      raw = raw.trim();
+      // Format YYYYMMDD
+      if (/^\d{8}$/.test(raw)) {
+        return `${raw.slice(6, 8)}/${raw.slice(4, 6)}/${raw.slice(0, 4)}`;
+      }
+      // ISO date
+      if (/^\d{4}-\d{2}-\d{2}/.test(raw)) {
+        const d = new Date(raw);
+        if (!isNaN(d)) return d.toLocaleDateString('fr-FR');
+      }
+      return raw;
+    }
+
+    // ──────────────────────────────────────────────
+    //  EN 16931 VALIDATION
+    // ──────────────────────────────────────────────
+    const EN16931_RULES = [
+      {
+        id: 'BT-1',
+        label: 'Numéro de facture (BT-1)',
+        desc: 'L\'identifiant unique de la facture doit être présent.',
+        test: xml => !!xml.getElementsByTagNameNS('*', 'ID')[0]?.textContent?.trim(),
+        severity: 'error',
+      },
+      {
+        id: 'BT-2',
+        label: 'Date d\'émission (BT-2)',
+        desc: 'La date d\'émission de la facture est obligatoire.',
+        test: xml => {
+          const els = [...xml.getElementsByTagNameNS('*', 'IssueDateTime'),
+          ...xml.getElementsByTagNameNS('*', 'IssueDate')];
+          return els.some(e => e.textContent?.trim());
+        },
+        severity: 'error',
+      },
+      {
+        id: 'BT-3',
+        label: 'Code de type de facture (BT-3)',
+        desc: 'TypeCode ou InvoiceTypeCode doit indiquer 380 (facture commerciale).',
+        test: xml => {
+          const els = [...xml.getElementsByTagNameNS('*', 'TypeCode'),
+          ...xml.getElementsByTagNameNS('*', 'InvoiceTypeCode')];
+          return els.some(e => ['380', '381', '389', '384', '383', '386', '875', '876', '877']
+            .includes(e.textContent?.trim()));
+        },
+        severity: 'warning',
+      },
+      {
+        id: 'BT-23',
+        label: 'Contexte du profil (BT-23)',
+        desc: 'Le profil Factur-X/EN16931 doit être déclaré.',
+        test: xml => !!getProfileId(xml),
+        severity: 'warning',
+      },
+      {
+        id: 'BG-4',
+        label: 'Informations vendeur (BG-4)',
+        desc: 'Le nom du vendeur (SellerTradeParty / Name) est requis.',
+        test: xml => {
+          const names = xml.getElementsByTagNameNS('*', 'SellerTradeParty');
+          for (const n of names) {
+            if (n.getElementsByTagNameNS('*', 'Name')[0]?.textContent?.trim()) return true;
+          }
+          return false;
+        },
+        severity: 'error',
+      },
+      {
+        id: 'BG-7',
+        label: 'Informations acheteur (BG-7)',
+        desc: 'Le nom de l\'acheteur (BuyerTradeParty / Name) est requis.',
+        test: xml => {
+          const names = xml.getElementsByTagNameNS('*', 'BuyerTradeParty');
+          for (const n of names) {
+            if (n.getElementsByTagNameNS('*', 'Name')[0]?.textContent?.trim()) return true;
+          }
+          // UBL fallback
+          return !!xml.getElementsByTagNameNS('*', 'AccountingCustomerParty')[0];
+        },
+        severity: 'error',
+      },
+      {
+        id: 'BT-106',
+        label: 'Montant HT total (BT-106)',
+        desc: 'TaxBasisTotalAmount ou TaxExclusiveAmount doit être présent.',
+        test: xml => {
+          const tags = ['TaxBasisTotalAmount', 'TaxExclusiveAmount', 'LineExtensionAmount'];
+          return tags.some(t => xml.getElementsByTagNameNS('*', t)[0]?.textContent?.trim());
+        },
+        severity: 'error',
+      },
+      {
+        id: 'BT-110',
+        label: 'Montant TVA total (BT-110)',
+        desc: 'TaxTotalAmount ou TaxAmount doit être présent.',
+        test: xml => {
+          return ['TaxTotalAmount', 'TaxAmount'].some(
+            t => xml.getElementsByTagNameNS('*', t)[0]?.textContent?.trim()
+          );
+        },
+        severity: 'error',
+      },
+      {
+        id: 'BT-112',
+        label: 'Montant TTC total (BT-112)',
+        desc: 'GrandTotalAmount ou TaxInclusiveAmount doit être présent.',
+        test: xml => {
+          return ['GrandTotalAmount', 'TaxInclusiveAmount', 'PayableAmount'].some(
+            t => xml.getElementsByTagNameNS('*', t)[0]?.textContent?.trim()
+          );
+        },
+        severity: 'error',
+      },
+      {
+        id: 'BT-81',
+        label: 'Moyen de paiement (BT-81)',
+        desc: 'Un code de moyen de paiement (PaymentMeansCode) est recommandé.',
+        test: xml => !!xml.getElementsByTagNameNS('*', 'TypeCode')[1] ||
+          !!xml.getElementsByTagNameNS('*', 'PaymentMeansCode')[0],
+        severity: 'warning',
+      },
+      {
+        id: 'BT-9',
+        label: 'Date d\'échéance (BT-9)',
+        desc: 'La date d\'échéance de paiement est recommandée.',
+        test: xml => {
+          return ['DueDateDateTime', 'PaymentDueDate'].some(
+            t => xml.getElementsByTagNameNS('*', t)[0]?.textContent?.trim()
+          );
+        },
+        severity: 'info',
+      },
+      {
+        id: 'NS-CHECK',
+        label: 'Espace de noms XML valide',
+        desc: 'Le namespace CII (urn:un:unece…) ou UBL doit être déclaré.',
+        test: xml => {
+          const root = xml.documentElement;
+          const ns = root.namespaceURI || root.getAttribute('xmlns') || '';
+          return ns.includes('unece') || ns.includes('oasis') || ns.includes('cen.eu') ||
+            root.tagName.includes('CrossIndustry') || root.tagName.includes('Invoice');
+        },
+        severity: 'error',
+      },
+    ];
+
+    function detectProfile(profileId) {
+      if (!profileId) return { name: 'Inconnu', ok: false };
+      const p = profileId.toLowerCase();
+      if (p.includes('minimum')) return { name: 'MINIMUM', ok: true };
+      if (p.includes('basicwl')) return { name: 'BASIC WL', ok: true };
+      if (p.includes('basic')) return { name: 'BASIC', ok: true };
+      if (p.includes('en16931') || p.includes('comfort')) return { name: 'EN 16931', ok: true };
+      if (p.includes('extended')) return { name: 'EXTENDED', ok: true };
+      if (p.includes('xrechnung')) return { name: 'XRechnung', ok: true };
+      if (p.includes('zugferd')) return { name: 'ZUGFeRD', ok: true };
+      return { name: profileId.split(':').pop() || 'Personnalisé', ok: true };
+    }
+
+    function validateEN16931(xmlDoc, xmlText) {
+      const results = EN16931_RULES.map(rule => {
+        let passed = false;
+        try { passed = rule.test(xmlDoc); } catch (e) { passed = false; }
+        return { ...rule, passed };
+      });
+
+      const profileId = getProfileId(xmlDoc);
+      const profile = detectProfile(profileId);
+
+      const errors = results.filter(r => !r.passed && r.severity === 'error').length;
+      const warnings = results.filter(r => !r.passed && r.severity === 'warning').length;
+
+      return { results, profile, profileId, profileOk: profile.ok, errors, warnings };
+    }
+
+    // ──────────────────────────────────────────────
+    //  DIGITAL SIGNATURE DETECTION
+    // ──────────────────────────────────────────────
+    async function detectSignature(uint8, pdfDoc) {
+      const result = { found: false, valid: null, details: [], certInfo: null };
+
+      // 1. Check raw PDF bytes for /Sig dictionary markers
+      const pdfText = new TextDecoder('latin1').decode(uint8);
+      const hasSig = pdfText.includes('/Type /Sig') ||
+        pdfText.includes('/Type/Sig') ||
+        pdfText.includes('/ByteRange') ||
+        pdfText.includes('/Sig\n') ||
+        pdfText.includes('/SigFlags');
+
+      if (!hasSig) {
+        result.details.push('Aucun dictionnaire /Sig trouvé dans le PDF.');
+        return result;
+      }
+
+      result.found = true;
+      result.details.push('Dictionnaire de signature PDF détecté (/Sig).');
+
+      // 2. Try to extract filter and subfilter
+      const sigMatch = pdfText.match(/\/Filter\s*\/([^\s\/\]>]+)/);
+      if (sigMatch) result.details.push(`Filtre : ${sigMatch[1]}`);
+
+      const subMatch = pdfText.match(/\/SubFilter\s*\/([^\s\/\]>]+)/);
+      if (subMatch) result.details.push(`Sous-filtre : ${subMatch[1]}`);
+
+      // 3. Look for /Reason or /ContactInfo
+      const reasonMatch = pdfText.match(/\/Reason\s*\(([^)]{1,80})\)/);
+      if (reasonMatch) result.details.push(`Motif : ${reasonMatch[1]}`);
+
+      const contactMatch = pdfText.match(/\/ContactInfo\s*\(([^)]{1,120})\)/);
+      if (contactMatch) result.details.push(`Contact : ${contactMatch[1]}`);
+
+      // 4. Try to extract certificate DER from Contents field
+      try {
+        const contentsMatch = pdfText.match(/\/Contents\s*<([0-9a-fA-F\s]{40,})>/);
+        const byteRangeMatch = pdfText.match(/\/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\]/);
+
+        if (byteRangeMatch) {
+          const [_, start1, len1, start2, len2] = byteRangeMatch.map(Number);
+          const totalCovered = len1 + len2;
+          if (totalCovered < uint8.length * 0.9) {
+            result.valid = false;
+            result.details.push('Alerte : La signature ne couvre pas la totalité du document (Intégrité suspecte).');
+          } else {
+            result.details.push('L\'intégrité de la structure ByteRange semble correcte.');
+          }
+        }
+
+        if (contentsMatch) {
+          const hex = contentsMatch[1].replace(/\s/g, '');
+          if (hex.length > 80) {
+            result.details.push(`Contenu de signature trouvé (${hex.length / 2} octets).`);
+
+            // Use node-forge to parse PKCS#7 / CMS
+            try {
+              const signatureBytes = forge.util.hexToBytes(hex);
+              const p7 = forge.pkcs7.messageFromAsn1(forge.asn1.fromDer(signatureBytes));
+              const cert = p7.certificates[0];
+
+              if (cert) {
+                const subject = cert.subject.attributes.map(a => `${a.shortName || a.name}=${a.value}`).join(', ');
+                const issuer = cert.issuer.attributes.map(a => `${a.shortName || a.name}=${a.value}`).join(', ');
+                result.certInfo = subject;
+                result.details.push(`Émis par : ${issuer}`);
+                result.details.push(`Valide du : ${cert.validity.notBefore.toLocaleDateString()} au ${cert.validity.notAfter.toLocaleDateString()}`);
+              }
+            } catch (e) {
+              console.warn('Forge parsing error:', e);
+              // Fallback to basic scan if node-forge fails on some specific CMS formats
+              const der = hexToUint8(hex.slice(0, Math.min(hex.length, 8192)));
+              const certParsed = tryParseDer(der);
+              if (certParsed) {
+                result.certInfo = certParsed;
+                result.details.push(`Détails cert (scan) : ${certParsed}`);
+              }
+            }
+          }
+        }
+      } catch (e) {
+        result.details.push('Extraction de la signature échouée : ' + e.message);
+      }
+
+      return result;
+    }
+
+    function hexToUint8(hex) {
+      const arr = new Uint8Array(hex.length / 2);
+      for (let i = 0; i < arr.length; i++)
+        arr[i] = parseInt(hex.substr(i * 2, 2), 16);
+      return arr;
+    }
+
+    function tryParseDer(der) {
+      // Very basic DER/ASN.1 inspection: look for printable strings
+      try {
+        let result = '';
+        let i = 0;
+        while (i < der.length - 4) {
+          // Tag 0x13 = PrintableString, 0x0C = UTF8String, 0x16 = IA5String
+          if ([0x13, 0x0C, 0x16].includes(der[i])) {
+            const len = der[i + 1];
+            if (len > 3 && len < 80 && i + 2 + len <= der.length) {
+              const str = new TextDecoder('ascii', { fatal: false })
+                .decode(der.slice(i + 2, i + 2 + len));
+              if (/^[\x20-\x7E]+$/.test(str) && str.length > 3) {
+                result += str + ' | ';
+                if (result.length > 120) break;
+              }
+            }
+          }
+          i++;
+        }
+        return result.trim().replace(/\|+$/, '').trim() || null;
+      } catch { return null; }
+    }
+
+    // ──────────────────────────────────────────────
+    //  RENDER RESULTS
+    // ──────────────────────────────────────────────
+    function renderResults(file, data, validation, sigResult) {
+      // File banner
+      $('fileName').textContent = file.name;
+      $('fileSize').textContent = formatBytes(file.size) + ' · PDF/A-3';
+
+      // ── Summary Cards
+      const totalRules = validation.results.length;
+      const passed = validation.results.filter(r => r.passed).length;
+      const errCnt = validation.errors;
+      const warnCnt = validation.warnings;
+
+      $('validationSummary').innerHTML = `
+      ${summaryCard('Règles validées', passed + '/' + totalRules,
+        passed === totalRules ? 'emerald' : errCnt > 0 ? 'red' : 'amber',
+        '<path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/>')}
+      ${summaryCard('Profil', validation.profile.name,
+          validation.profileOk ? 'indigo' : 'amber',
+          '<path stroke-linecap="round" stroke-linejoin="round" d="M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 0 0 9.568 3Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M6 6h.008v.008H6V6Z"/>')}
+      ${summaryCard('Erreurs', errCnt.toString(),
+            errCnt === 0 ? 'emerald' : 'red',
+            '<path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/>')}
+      ${summaryCard('Signature', sigResult.found ? (sigResult.valid === false ? '⚠ Invalide' : '✓ Détectée') : '— Absente',
+              sigResult.found ? (sigResult.valid === false ? 'red' : 'blue') : 'slate',
+              '<path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"/>')}
+    `;
+
+      // ── Data Table
+      const rows = [
+        ['Fournisseur', data.supplierName],
+        ['SIRET / ID', data.supplierSiret],
+        ['Acheteur', data.buyerName],
+        ['Numéro de facture', data.invoiceNumber],
+        ['Date d\'émission', data.invoiceDate],
+        ['Montant HT', data.amountHT ? fmtAmount(data.amountHT, data.currency) : null],
+        ['Montant TVA', data.amountTVA ? fmtAmount(data.amountTVA, data.currency) : null],
+        ['Montant TTC', data.amountTTC ? fmtAmount(data.amountTTC, data.currency) : null],
+        ['Profil', data.profileId],
+      ];
+
+      $('dataTable').innerHTML = rows.map(([label, value]) => `
+      <div class="data-row flex items-center justify-between px-6 py-3.5">
+        <span class="text-sm text-white/50 shrink-0 w-40">${label}</span>
+        <span class="text-sm font-medium text-right ${value ? 'text-white/90' : 'text-white/20 italic'}">
+          ${value || '—'}
+        </span>
+      </div>
+    `).join('');
+
+      // ── Profile Badge
+      $('profileBadge').outerHTML = `<span id="profileBadge"
+      class="badge-anim ml-auto px-3 py-1 rounded-full text-xs font-semibold border
+             ${validation.profileOk
+          ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+          : 'bg-amber-500/20 text-amber-300 border-amber-500/30'}">
+      ${validation.profile.name}
+    </span>`;
+
+      // ── Checklist
+      $('checklistItems').innerHTML = validation.results.map(r => checklistRow(r)).join('');
+
+      // ── Signature
+      renderSignature(sigResult);
+
+      // ── XML
+      $('xmlContent').textContent = formatXml(state.xmlText);
+
+      // Show results
+      $('resultsSection').classList.remove('hidden');
+    }
+
+    function summaryCard(label, value, color, svgPath) {
+      const colors = {
+        emerald: 'from-emerald-600/20 to-emerald-700/10 border-emerald-500/20 text-emerald-300',
+        red: 'from-red-600/20 to-red-700/10 border-red-500/20 text-red-300',
+        amber: 'from-amber-600/20 to-amber-700/10 border-amber-500/20 text-amber-300',
+        indigo: 'from-indigo-600/20 to-indigo-700/10 border-indigo-500/20 text-indigo-300',
+        blue: 'from-blue-600/20 to-blue-700/10 border-blue-500/20 text-blue-300',
+        slate: 'from-slate-600/20 to-slate-700/10 border-slate-500/20 text-slate-300',
+        violet: 'from-violet-600/20 to-violet-700/10 border-violet-500/20 text-violet-300',
+      };
+      const c = colors[color] || colors.slate;
+      return `
+      <div class="badge-anim glass rounded-2xl p-4 bg-gradient-to-br border ${c} space-y-2">
+        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">${svgPath}</svg>
+        <p class="text-2xl font-bold">${value}</p>
+        <p class="text-xs text-white/40">${label}</p>
+      </div>`;
+    }
+
+    function checklistRow(rule) {
+      const severityColors = {
+        error: { yes: 'bg-emerald-500/10 text-emerald-400', no: 'bg-red-500/10 text-red-400' },
+        warning: { yes: 'bg-emerald-500/10 text-emerald-400', no: 'bg-amber-500/10 text-amber-400' },
+        info: { yes: 'bg-emerald-500/10 text-emerald-400', no: 'bg-slate-500/10 text-slate-400' },
+      };
+      const sc = severityColors[rule.severity] || severityColors.info;
+      const cls = rule.passed ? sc.yes : sc.no;
+      const icon = rule.passed ? '✓' : rule.severity === 'error' ? '✗' : '⚠';
+      const badge = rule.severity === 'error' ? 'Obligatoire' : rule.severity === 'warning' ? 'Recommandé' : 'Optionnel';
+      const badgeCls = rule.severity === 'error'
+        ? 'bg-red-500/10 text-red-400 border-red-500/20'
+        : rule.severity === 'warning'
+          ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+          : 'bg-slate-500/10 text-slate-400 border-slate-500/20';
+
+      return `
+      <div class="badge-anim flex items-start gap-3 px-4 py-3 rounded-xl hover:bg-white/[.03] transition-colors">
+        <span class="w-7 h-7 rounded-lg flex items-center justify-center text-sm font-bold shrink-0 ${cls}">${icon}</span>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center flex-wrap gap-2">
+            <span class="text-sm font-medium text-white/85">${rule.label}</span>
+            <span class="text-xs px-1.5 py-0.5 rounded border font-mono ${badgeCls}">${rule.id}</span>
+            <span class="text-xs px-1.5 py-0.5 rounded border ${badgeCls}">${badge}</span>
+          </div>
+          <p class="text-xs text-white/40 mt-0.5">${rule.desc}</p>
+        </div>
+      </div>`;
+    }
+
+    function renderSignature(sig) {
+      if (!sig.found) {
+        $('signatureResult').innerHTML = `
+        <div class="flex items-start gap-4">
+          <div class="w-10 h-10 rounded-xl bg-slate-500/20 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round"
+                d="M13.5 10.5V6.75a4.5 4.5 0 1 1 9 0v3.75M3.75 21.75h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H3.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"/>
+            </svg>
+          </div>
+          <div>
+            <p class="font-semibold text-white/70">Aucune signature numérique détectée</p>
+            <p class="text-sm text-white/40 mt-1">Ce PDF ne contient pas de signature numérique PDF (PAdES/CAdES). La signature est optionnelle selon la norme Factur-X.</p>
+          </div>
+        </div>`;
+        return;
+      }
+
+      const statusColor = sig.valid === false ? 'red' : 'blue';
+      const statusText = sig.valid === false ? '⚠ Vérification partiellement échouée' : '✓ Signature détectée';
+
+      $('signatureResult').innerHTML = `
+      <div class="space-y-4">
+        <div class="flex items-start gap-4">
+          <div class="w-10 h-10 rounded-xl bg-${statusColor}-500/20 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5 text-${statusColor}-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round"
+                d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"/>
+            </svg>
+          </div>
+          <div>
+            <p class="font-semibold text-${statusColor}-300">${statusText}</p>
+            ${sig.certInfo ? `<p class="text-xs text-white/50 mt-1 font-mono">${sig.certInfo}</p>` : ''}
+          </div>
+        </div>
+        <ul class="space-y-1.5">
+          ${sig.details.map(d => `
+            <li class="flex items-start gap-2 text-sm text-white/60">
+              <span class="text-indigo-400 mt-0.5 shrink-0">›</span>
+              <span>${d}</span>
+            </li>`).join('')}
+        </ul>
+        <div class="rounded-xl bg-blue-500/10 border border-blue-500/20 px-4 py-3 text-xs text-blue-300">
+          ℹ La vérification cryptographique complète de la chaîne de confiance n'est pas possible sans accès à un store de certificats racine. Pour une vérification complète, utilisez un outil certifié ETSI TS 119 102.
+        </div>
+      </div>`;
+    }
+
+    // ──────────────────────────────────────────────
+    //  UTILITIES
+    // ──────────────────────────────────────────────
+    function formatBytes(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+    }
+
+    function fmtAmount(val, currency = 'EUR') {
+      return parseFloat(val).toLocaleString('fr-FR', {
+        style: 'currency',
+        currency: currency || 'EUR',
+        minimumFractionDigits: 2,
+      });
+    }
+
+    function formatXml(xml) {
+      // Simple pretty-print
+      let formatted = '';
+      let indent = 0;
+      const lines = xml.replace(/>\s*</g, '>\n<').split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        if (trimmed.startsWith('</')) indent = Math.max(0, indent - 1);
+        formatted += '  '.repeat(indent) + trimmed + '\n';
+        if (trimmed.startsWith('<') && !trimmed.startsWith('</') &&
+          !trimmed.endsWith('/>') && !trimmed.includes('</')) {
+          indent++;
+        }
+      }
+      return formatted;
+    }
+
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+  </script>
+</body>
+
+</html>
